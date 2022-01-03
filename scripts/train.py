@@ -20,7 +20,7 @@ def main():
 
     model = ARDLeNet() if use_ard else VanillaLeNet()
     model.cuda()
-    optimizer = Adam(model.parameters(), lr=1e-3)
+    optimizer = Adam(model.parameters(), lr=5e-4)
     train_loader, test_loader = make_mnist_data_loaders(batch_size)
     criterion = ELBOLoss(model, nn.CrossEntropyLoss())
 

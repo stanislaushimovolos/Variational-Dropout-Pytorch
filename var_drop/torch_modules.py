@@ -1,49 +1,27 @@
 import torch
 import numpy as np
+from typing import Union
 from torch import nn as nn
 from torch.nn import functional as F
 
 from .utils import to_numpy
 
+TorchLike = Union[torch.Tensor, nn.Parameter]
+
 
 class ARDMixin:
-    def get_kl_loss(self):
-        raise NotImplementedError
-
-    def get_dropped_params_number(self):
-        raise NotImplementedError
-
-    def get_total_params_number(self):
-        raise NotImplementedError
-
-
-class LinearARD(nn.Module, ARDMixin):
-    def __init__(self, in_features: int, out_features: int, threshold: int = 3, eps=1e-10):
-        super().__init__()
+    def __init__(self, weight: TorchLike, log_sigma2: nn.Parameter, threshold: float, eps: float):
         self.eps = eps
         self.threshold = threshold
-        self.in_features = in_features
-        self.out_features = out_features
-        self.bias = nn.Parameter(torch.zeros(1, out_features))
-        self.weight = nn.Parameter(torch.zeros(out_features, in_features))
-        self.log_sigma2 = nn.Parameter(torch.zeros(out_features, in_features))
+        self.weight = weight
+        self.log_sigma2 = log_sigma2
 
-        self.init_parameters()
+    def get_dropped_params_number(self):
+        mask = self._get_clip_mask()
+        return (mask == 0).cpu().numpy().sum()
 
-    def init_parameters(self):
-        self.bias.data.zero_()
-        self.weight.data.normal_(0, 0.02)
-        self.log_sigma2.data.fill_(-10)
-
-    def forward(self, x: torch.Tensor):
-        if self.training:
-            mean = F.linear(x, self.weight) + self.bias
-            std = torch.sqrt(F.linear(x * x, torch.exp(self.log_sigma2)) + self.eps)
-            noise = torch.normal(torch.zeros_like(mean), std)
-            return mean + noise * std
-        else:
-            pruned_weights = self._get_pruned_weights()
-            return F.linear(x, pruned_weights) + self.bias
+    def get_total_params_number(self):
+        return np.prod(self.weight.shape)
 
     def _get_clip_mask(self):
         log_alpha = self._get_log_alpha()
@@ -65,19 +43,59 @@ class LinearARD(nn.Module, ARDMixin):
         loss = -torch.sum(kl)
         return loss
 
-    def get_dropped_params_number(self):
-        mask = self._get_clip_mask()
-        return (mask == 0).cpu().numpy().sum()
 
-    def get_total_params_number(self):
-        return np.prod(self.weight.shape)
-
-
-class ConvolutionARD(nn.Module, ARDMixin):
-    def __init__(self, threshold: int = 3, eps=1e-10):
-        super().__init__()
+class LinearARD(nn.Module, ARDMixin):
+    def __init__(self, in_features: int, out_features: int, threshold: int = 3, eps=1e-10):
+        nn.Module.__init__(self)
         self.eps = eps
         self.threshold = threshold
+        self.in_features = in_features
+        self.out_features = out_features
+        self.bias = nn.Parameter(torch.zeros(1, out_features))
+        self.weight = nn.Parameter(torch.zeros(out_features, in_features))
+        self.log_sigma2 = nn.Parameter(torch.zeros(out_features, in_features))
+
+        self.init_parameters()
+        ARDMixin.__init__(self, self.weight, self.log_sigma2, self.threshold, self.eps)
+
+    def init_parameters(self):
+        self.bias.data.zero_()
+        self.weight.data.normal_(0, 0.02)
+        self.log_sigma2.data.fill_(-10)
+
+    def forward(self, x: torch.Tensor):
+        if self.training:
+            mean = F.linear(x, self.weight) + self.bias
+            std = torch.sqrt(F.linear(x * x, torch.exp(self.log_sigma2)) + self.eps)
+            noise = torch.normal(torch.zeros_like(mean), std)
+            return mean + noise * std
+        else:
+            pruned_weights = self._get_pruned_weights()
+            return F.linear(x, pruned_weights) + self.bias
+
+
+class ConvolutionARD(nn.Conv2d, ARDMixin):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, threshold: int = 3, eps=1e-10):
+        nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride,
+                           padding, dilation, groups, bias=False)
+        self.eps = eps
+        self.bias = None
+        self.threshold = threshold
+        self.log_sigma2 = nn.Parameter(-10 * torch.ones_like(self.weight))
+        ARDMixin.__init__(self, self.weight, self.log_sigma2, self.threshold, self.eps)
+
+    def forward(self, x: torch.Tensor):
+        if self.training:
+            mean = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+            sigma2 = torch.exp(self.log_sigma2)
+            var = F.conv2d(x ** 2, sigma2, self.bias, self.stride, self.padding, self.dilation, self.groups)
+            std = torch.sqrt(self.eps + var)
+            noise = torch.normal(torch.zeros_like(mean), torch.ones_like(mean))
+            return mean + noise * std
+        else:
+            pruned_weights = self._get_pruned_weights()
+            return F.conv2d(x, pruned_weights, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
 
 class ELBOLoss(nn.Module):
@@ -99,9 +117,9 @@ class ELBOLoss(nn.Module):
         data_term = self.data_loss(x, target)
         total_loss = kl_term + data_term
         return total_loss, {
-            'loss': to_numpy(total_loss),
-            'kl_term': to_numpy(kl_term),
-            'data_term': to_numpy(data_term),
+            'loss': float(to_numpy(total_loss)),
+            'kl_term': float(to_numpy(kl_term)),
+            'data_term': float(to_numpy(data_term)),
             'sparsity': calculate_total_sparsity(self.model)
         }
 
