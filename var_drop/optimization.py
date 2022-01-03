@@ -46,6 +46,9 @@ def train(train_data_loader: DataLoader, model: nn.Module, criterion: Callable, 
 
     total_losses = []
     for epoch in range(n_epochs):
+        if validation_callback is not None:
+            validation_score = validation_callback()
+
         epoch_losses = []
         for batch_idx, batch in enumerate(train_data_loader):
             # enable last FC layer
@@ -57,9 +60,6 @@ def train(train_data_loader: DataLoader, model: nn.Module, criterion: Callable, 
             bar.set_description(desc=f'Train loss {total_loss}, validation score {validation_score}\n')
             bar.refresh()
             bar.display()
-
-        if validation_callback is not None:
-            validation_score = validation_callback()
 
         current_save_path = checkpoints_path / f'model_{epoch}.pth'
         torch.save(model.state_dict(), current_save_path)

@@ -8,6 +8,8 @@ PathLike = Union[str, Path]
 
 
 def to_numpy(x: torch.Tensor) -> np.ndarray:
+    if isinstance(x, float):
+        return x
     return x.cpu().detach().numpy()
 
 

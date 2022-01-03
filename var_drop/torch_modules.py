@@ -39,7 +39,7 @@ class ARDMixin:
     def get_kl_loss(self):
         k1, k2, k3 = 0.63576, 1.87320, 1.48695
         log_alpha = self._get_log_alpha()
-        kl = k1 * torch.sigmoid(k2 + k3 * log_alpha) - 0.5 * torch.log1p(torch.exp(-log_alpha))
+        kl = k1 * torch.sigmoid(k2 + k3 * log_alpha) - 0.5 * torch.log1p(torch.exp(-log_alpha)) - k1
         loss = -torch.sum(kl)
         return loss
 
@@ -67,7 +67,7 @@ class LinearARD(nn.Module, ARDMixin):
         if self.training:
             mean = F.linear(x, self.weight) + self.bias
             std = torch.sqrt(F.linear(x * x, torch.exp(self.log_sigma2)) + self.eps)
-            noise = torch.normal(torch.zeros_like(mean), std)
+            noise = torch.normal(torch.zeros_like(mean), std + self.eps)
             return mean + noise * std
         else:
             pruned_weights = self._get_pruned_weights()
@@ -91,7 +91,7 @@ class ConvolutionARD(nn.Conv2d, ARDMixin):
             sigma2 = torch.exp(self.log_sigma2)
             var = F.conv2d(x ** 2, sigma2, self.bias, self.stride, self.padding, self.dilation, self.groups)
             std = torch.sqrt(self.eps + var)
-            noise = torch.normal(torch.zeros_like(mean), torch.ones_like(mean))
+            noise = torch.normal(torch.zeros_like(mean), torch.ones_like(mean) + self.eps)
             return mean + noise * std
         else:
             pruned_weights = self._get_pruned_weights()
