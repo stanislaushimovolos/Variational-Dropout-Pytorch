@@ -3,6 +3,8 @@ import numpy as np
 from torch import nn as nn
 from torch.nn import functional as F
 
+from .utils import to_numpy
+
 
 class ARDMixin:
     def get_kl_loss(self):
@@ -33,7 +35,7 @@ class LinearARD(nn.Module, ARDMixin):
         self.weight.data.normal_(0, 0.02)
         self.log_sigma2.data.fill_(-10)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         if self.training:
             mean = F.linear(x, self.weight) + self.bias
             std = torch.sqrt(F.linear(x * x, torch.exp(self.log_sigma2)) + self.eps)
@@ -52,7 +54,7 @@ class LinearARD(nn.Module, ARDMixin):
         return self.weight * mask
 
     def _get_log_alpha(self):
-        log_alpha = self.log_sigma2 - 2 * torch.log(torch.abs(self.weight) + 1e-15)
+        log_alpha = self.log_sigma2 - 2 * torch.log(torch.abs(self.weight) + self.eps)
         log_alpha = torch.clamp(log_alpha, -10, 10)
         return log_alpha
 
@@ -71,13 +73,15 @@ class LinearARD(nn.Module, ARDMixin):
         return np.prod(self.weight.shape)
 
 
-class ConvolutionARD(nn.Module):
-    def __init__(self):
+class ConvolutionARD(nn.Module, ARDMixin):
+    def __init__(self, threshold: int = 3, eps=1e-10):
         super().__init__()
+        self.eps = eps
+        self.threshold = threshold
 
 
 class ELBOLoss(nn.Module):
-    def __init__(self, model, data_loss):
+    def __init__(self, model: nn.Module, data_loss: nn.Module):
         super().__init__()
         self.model = model
         self.data_loss = data_loss
@@ -94,10 +98,15 @@ class ELBOLoss(nn.Module):
         kl_term = kl_weight * get_kl_term(self.model)
         data_term = self.data_loss(x, target)
         total_loss = kl_term + data_term
-        return total_loss
+        return total_loss, {
+            'loss': to_numpy(total_loss),
+            'kl_term': to_numpy(kl_term),
+            'data_term': to_numpy(data_term),
+            'sparsity': calculate_total_sparsity(self.model)
+        }
 
 
-def get_total_params_number(module):
+def get_total_params_number(module: nn.Module):
     if isinstance(module, LinearARD) or isinstance(module, ConvolutionARD):
         return module.get_total_params_number()
     elif len(list(module.children())) > 0:
@@ -105,7 +114,7 @@ def get_total_params_number(module):
     return sum(p.numel() for p in module.parameters())
 
 
-def get_dropped_params_number(module):
+def get_dropped_params_number(module: nn.Module):
     if isinstance(module, LinearARD) or isinstance(module, ConvolutionARD):
         return module.get_dropped_params_number()
     elif len(list(module.children())) > 0:
@@ -114,5 +123,5 @@ def get_dropped_params_number(module):
         return 0
 
 
-def calculate_total_sparsity(module):
+def calculate_total_sparsity(module: nn.Module):
     return get_dropped_params_number(module) / get_total_params_number(module)

@@ -2,37 +2,39 @@ import json
 import argparse
 from torch.optim import Adam
 from torch import nn as nn
-from var_drop import make_mnist_data_loaders, train, inference_step, LeNet, ELBOLoss
+from var_drop import VanillaLeNet, ARDLeNet, make_mnist_data_loaders, train, inference_step, ELBOLoss
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_epochs', type=int, default=25)
+    parser.add_argument('--use_ard', type=bool, default=True)
+    parser.add_argument('--n_epochs', type=int, default=50)
     parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--checkpoints_path', type=str, help='path to save model parameters and train artifacts')
 
     args = parser.parse_args()
-    batch_size = args.batch_size
+    use_ard = args.use_ard
     n_epochs = args.n_epochs
+    batch_size = args.batch_size
     checkpoints_path = args.checkpoints_path
 
-    model = LeNet()
+    model = ARDLeNet() if use_ard else VanillaLeNet()
     model.cuda()
-    optimizer = Adam(model.parameters(), lr=5e-4)
+    optimizer = Adam(model.parameters(), lr=1e-3)
     train_loader, test_loader = make_mnist_data_loaders(batch_size)
+    criterion = ELBOLoss(model, nn.CrossEntropyLoss())
 
     test_loss_history = []
 
     def callback():
-        criterion = nn.CrossEntropyLoss()
         n_total = 0
         n_correct = 0
 
         test_losses = []
         for inputs, targets in test_loader:
             preds = inference_step(inputs, model, use_amp=False).cpu()
-            loss = criterion(preds, targets)
-            test_losses.append(loss.item())
+            loss, detached_loss = criterion(preds, targets)
+            test_losses.append(detached_loss)
 
             _, predicted = preds.max(1)
             n_total += targets.shape[0]
@@ -44,11 +46,11 @@ def main():
     train_loss_history = train(
         model=model,
         scaler=None,
-        optimizer=optimizer,
         n_epochs=n_epochs,
+        criterion=criterion,
+        optimizer=optimizer,
         validation_callback=callback,
         train_data_loader=train_loader,
-        criterion=nn.CrossEntropyLoss(),
         checkpoints_path=checkpoints_path,
     )
 

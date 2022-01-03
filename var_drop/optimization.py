@@ -31,10 +31,10 @@ def train_step(inputs: torch.tensor, targets: torch.tensor, model: nn.Module, cr
         inputs = inputs.to(next(model.parameters()))
         targets = targets.to(next(model.parameters()))
         targets = targets.long()
-        loss = criterion(model(inputs), targets, **kwargs)
+        loss, detached_loss = criterion(model(inputs), targets, **kwargs)
 
     optimizer_step(optimizer, loss, scaler=scaler)
-    return loss.data.cpu().numpy()
+    return detached_loss
 
 
 def train(train_data_loader: DataLoader, model: nn.Module, criterion: Callable, n_epochs: int,
@@ -51,10 +51,10 @@ def train(train_data_loader: DataLoader, model: nn.Module, criterion: Callable, 
             # enable last FC layer
             images, targets = batch
             # do optimization
-            loss = train_step(images, targets, model, criterion, optimizer, scaler=scaler)
-            epoch_losses.append(loss.item())
-
-            bar.set_description(desc=f'Train loss {loss}, validation score {validation_score}\n')
+            detached_loss = train_step(images, targets, model, criterion, optimizer, scaler=scaler)
+            epoch_losses.append(detached_loss)
+            total_loss = detached_loss['loss']
+            bar.set_description(desc=f'Train loss {total_loss}, validation score {validation_score}\n')
             bar.refresh()
             bar.display()
 
