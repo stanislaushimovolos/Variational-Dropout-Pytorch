@@ -2,7 +2,7 @@ import json
 import argparse
 from torch.optim import Adam
 from torch import nn as nn
-from var_drop import make_mnist_data_loaders, train, inference_step, LeNet
+from var_drop import make_mnist_data_loaders, train, inference_step, LeNet, ELBOLoss
 
 
 def main():

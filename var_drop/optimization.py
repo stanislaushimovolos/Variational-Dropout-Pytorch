@@ -25,13 +25,13 @@ def optimizer_step(optimizer: Optimizer, loss: torch.Tensor, scaler: torch.cuda.
 
 
 def train_step(inputs: torch.tensor, targets: torch.tensor, model: nn.Module, criterion: Callable,
-               optimizer: Optimizer, *, scaler: torch.cuda.amp.GradScaler = None) -> np.ndarray:
+               optimizer: Optimizer, *, scaler: torch.cuda.amp.GradScaler = None, **kwargs) -> np.ndarray:
     model.train()
     with torch.cuda.amp.autocast(scaler is not None):
         inputs = inputs.to(next(model.parameters()))
         targets = targets.to(next(model.parameters()))
         targets = targets.long()
-        loss = criterion(model(inputs), targets)
+        loss = criterion(model(inputs), targets, **kwargs)
 
     optimizer_step(optimizer, loss, scaler=scaler)
     return loss.data.cpu().numpy()
@@ -56,6 +56,7 @@ def train(train_data_loader: DataLoader, model: nn.Module, criterion: Callable, 
 
             bar.set_description(desc=f'Train loss {loss}, validation score {validation_score}\n')
             bar.refresh()
+            bar.display()
 
         if validation_callback is not None:
             validation_score = validation_callback()
